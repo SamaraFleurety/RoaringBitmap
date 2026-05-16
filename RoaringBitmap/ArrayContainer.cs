@@ -282,15 +282,6 @@ namespace Collections.Special
         #region 动态元素
         private void EnsureCapacity(int min)
         {
-            if (min > Container.MaxSize)
-            {
-                // 如果需要的容量超过 4096，抛出异常或触发转换
-                // 实际上应该在 Add 方法中检查并转换容器类型
-                throw new InvalidOperationException(
-                    $"ArrayContainer capacity cannot exceed {Container.MaxSize}. " +
-                    $"Consider converting to BitmapContainer.");
-            }
-
             if (m_Capacity == Container.MaxSize) return;
 
             if (m_Capacity < min)
