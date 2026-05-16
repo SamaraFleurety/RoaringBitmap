@@ -110,5 +110,11 @@ namespace Collections.Special
             }
             return BitmapContainer.AndNot((BitmapContainer) x, (BitmapContainer) y);
         }
+
+        public abstract bool Add(ushort x);
+
+        public abstract bool Remove(ushort x);
+
+        public abstract bool Contains(ushort x);
     }
 }

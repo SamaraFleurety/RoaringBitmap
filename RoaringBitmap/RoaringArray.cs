@@ -11,12 +11,20 @@ namespace Collections.Special
         private const int SerialCookieNoRuncontainer = 12346;
         private const int SerialCookie = 12347;
         private const int NoOffsetThreshold = 4;
-        private readonly ushort[] m_Keys;
-        private readonly int m_Size;
-        private readonly Container[] m_Values;
+        private ushort[] m_Keys;
+        private int m_Size;
+        private Container[] m_Values;
 
+        private int m_Capacity;
 
-        // ReSharper disable once SuggestBaseTypeForParameter
+        public RoaringArray()
+        {
+            m_Capacity = 16;  // 初始容量
+            m_Keys = new ushort[m_Capacity];
+            m_Values = new Container[m_Capacity];
+            m_Size = 0;
+        }
+
         /// <summary>
         ///     Use List directly, because the enumerator is a struct
         /// </summary>
@@ -25,6 +33,7 @@ namespace Collections.Special
             m_Size = size;
             m_Keys = new ushort[m_Size];
             m_Values = new Container[m_Size];
+            m_Capacity = m_Size;
             for (var i = 0; i < m_Size; i++)
             {
                 m_Keys[i] = keys[i];
@@ -44,7 +53,7 @@ namespace Collections.Special
             }
         }
 
-        public long Cardinality { get; }
+        public long Cardinality { get; private set; }
 
         public IEnumerator<int> GetEnumerator()
         {
@@ -297,7 +306,7 @@ namespace Collections.Special
             var oldIndex = 0;
             for (var i = 0; i < Container.MaxCapacity; i++)
             {
-                var ushortI = (ushort) i;
+                var ushortI = (ushort)i;
                 var index = Array.BinarySearch(x.m_Keys, oldIndex, x.m_Size - oldIndex, ushortI);
                 if (index < 0)
                 {
@@ -415,7 +424,7 @@ namespace Collections.Special
                     {
                         if (values[i].Equals(ArrayContainer.One) || values[i].Equals(BitmapContainer.One))
                         {
-                            bitmapOfRunContainers[i / 8] |= (byte) (1 << (i % 8));
+                            bitmapOfRunContainers[i / 8] |= (byte)(1 << (i % 8));
                         }
                     }
                     binaryWriter.Write(bitmapOfRunContainers);
@@ -429,7 +438,7 @@ namespace Collections.Special
                 for (var k = 0; k < size; ++k)
                 {
                     binaryWriter.Write(keys[k]);
-                    binaryWriter.Write((ushort) (values[k].Cardinality - 1));
+                    binaryWriter.Write((ushort)(values[k].Cardinality - 1));
                 }
                 if (!hasRun || (size >= NoOffsetThreshold))
                 {
@@ -448,9 +457,9 @@ namespace Collections.Special
                     {
                         if (ac.Equals(ArrayContainer.One))
                         {
-                            binaryWriter.Write((ushort) 1);
-                            binaryWriter.Write((ushort) 0);
-                            binaryWriter.Write((ushort) (Container.MaxSize - 1));
+                            binaryWriter.Write((ushort)1);
+                            binaryWriter.Write((ushort)0);
+                            binaryWriter.Write((ushort)(Container.MaxSize - 1));
                         }
                         else
                         {
@@ -461,9 +470,9 @@ namespace Collections.Special
                     {
                         if (bc.Equals(BitmapContainer.One))
                         {
-                            binaryWriter.Write((ushort) 1);
-                            binaryWriter.Write((ushort) 0);
-                            binaryWriter.Write((ushort) (Container.MaxCapacity - 1));
+                            binaryWriter.Write((ushort)1);
+                            binaryWriter.Write((ushort)0);
+                            binaryWriter.Write((ushort)(Container.MaxCapacity - 1));
                         }
                         else
                         {
@@ -498,7 +507,7 @@ namespace Collections.Special
                     throw new InvalidDataException("No RoaringBitmap file.");
                 }
                 var hasRun = lbcookie == SerialCookie;
-                var size = (int) (hasRun ? (cookie >> 16) + 1 : binaryReader.ReadUInt32());
+                var size = (int)(hasRun ? (cookie >> 16) + 1 : binaryReader.ReadUInt32());
                 var keys = new ushort[size];
                 var containers = new Container[size];
                 var cardinalities = new int[size];
@@ -556,7 +565,7 @@ namespace Collections.Special
                             }
                             for (int i = value; i < value + length + 1; i++)
                             {
-                                values.Add((ushort) i);
+                                values.Add((ushort)i);
                             }
                             count += length;
                         }
@@ -614,6 +623,125 @@ namespace Collections.Special
                 }
             }
             return new RoaringArray(roaringArray.m_Size, keys, containers);
+        }
+        private void EnsureCapacity(int min)
+        {
+            if (m_Capacity < min)
+            {
+                int newCapacity = Math.Max(m_Capacity * 2, min);
+
+                // 扩容数组
+                Array.Resize(ref m_Keys, newCapacity);
+                Array.Resize(ref m_Values, newCapacity);
+
+                m_Capacity = newCapacity;
+            }
+        }
+
+        /// <summary>
+        /// 添加一个值（high/low 对）
+        /// </summary>
+        public void Add(ushort high, ushort low)
+        {
+            // ✅ 使用 Array.BinarySearch
+            int index = Array.BinarySearch(m_Keys, 0, m_Size, high);
+
+            if (index >= 0)
+            {
+                // 找到了，向已有容器添加
+                var container = m_Values[index];
+                if (container.Add(low))
+                {
+                    Cardinality++;
+                    CheckAndConvertContainer(index);
+                }
+            }
+            else
+            {
+                // 没找到，~index 是插入位置
+                int insertPos = ~index;
+
+                // ✅ 确保容量足够
+                EnsureCapacity(m_Size + 1);
+
+                // 移动元素，腾出插入位置
+                if (insertPos < m_Size)
+                {
+                    Array.Copy(m_Keys, insertPos, m_Keys, insertPos + 1, m_Size - insertPos);
+                    Array.Copy(m_Values, insertPos, m_Values, insertPos + 1, m_Size - insertPos);
+                }
+
+                // 插入新元素
+                m_Keys[insertPos] = high;
+                m_Values[insertPos] = new ArrayContainer();
+                m_Values[insertPos].Add(low);
+
+                m_Size++;
+                Cardinality++;
+            }
+        }
+
+        /// <summary>
+        /// 移除一个值
+        /// </summary>
+        public bool Remove(ushort high, ushort low)
+        {
+            int index = Array.BinarySearch(m_Keys, 0, m_Size, high);
+
+            if (index < 0)
+            {
+                return false;
+            }
+
+            var container = m_Values[index];
+            bool removed = container.Remove(low);
+
+            if (removed)
+            {
+                Cardinality--;
+
+                if (container.Cardinality == 0)
+                {
+                    // 删除容器，移动后续元素
+                    if (index < m_Size - 1)
+                    {
+                        Array.Copy(m_Keys, index + 1, m_Keys, index, m_Size - index - 1);
+                        Array.Copy(m_Values, index + 1, m_Values, index, m_Size - index - 1);
+                    }
+                    m_Size--;
+                }
+            }
+
+            return removed;
+        }
+
+        // 检查并转换容器类型
+        private void CheckAndConvertContainer(int index)
+        {
+            var container = m_Values[index];
+
+            // Array -> Bitmap（当元素超过 4096 时）
+            if (container is ArrayContainer ac && ac.Cardinality > Container.MaxSize)
+            {
+                m_Values[index] = BitmapContainer.Create(ac.Cardinality, ac.m_Content);
+            }
+            // Bitmap -> Array（当元素少于 4096 时，可选优化）
+            else if (container is BitmapContainer bc && bc.Cardinality < Container.MaxSize)
+            {
+                m_Values[index] = ArrayContainer.Create(bc);
+            }
+        }
+
+        public bool Contains(ushort high, ushort low)
+        {
+            int index = Array.BinarySearch(m_Keys, 0, m_Size, high);
+
+            if (index < 0)
+            {
+                return false;
+            }
+
+            return m_Values[index].Contains(low);
         }
     }
 }

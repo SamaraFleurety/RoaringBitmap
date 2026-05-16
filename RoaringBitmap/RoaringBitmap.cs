@@ -170,5 +170,20 @@ namespace Collections.Special
             var ra = RoaringArray.Deserialize(stream);
             return new RoaringBitmap(ra);
         }
+
+        public void Add(int val)
+        {
+            m_HighLowContainer.Add(Util.HighBits(val), Util.LowBits(val));
+        }
+
+        public bool Remove(int val)
+        {
+            return m_HighLowContainer.Remove(Util.HighBits(val), Util.LowBits(val));
+        }
+
+        public bool Contains(int val)
+        {
+            return m_HighLowContainer.Contains(Util.HighBits(val), Util.LowBits(val));
+        }
     }
 }

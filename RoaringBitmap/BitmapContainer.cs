@@ -9,9 +9,14 @@ namespace Collections.Special
     {
         private const int BitmapLength = 1024;
         public static readonly BitmapContainer One;
-        private readonly ulong[] m_Bitmap;
-        private readonly int m_Cardinality;
+        private ulong[] m_Bitmap;
+        private int m_Cardinality;
 
+        protected internal override int Cardinality => m_Cardinality;
+
+        public override int ArraySizeInBytes => MaxCapacity / 8;
+
+        #region 新建和初始化
         static BitmapContainer()
         {
             var data = new ulong[BitmapLength];
@@ -21,7 +26,11 @@ namespace Collections.Special
             }
             One = new BitmapContainer(1 << 16, data);
         }
-
+        private BitmapContainer()
+        {
+            m_Bitmap = new ulong[BitmapLength];
+            m_Cardinality = 0;
+        }
         private BitmapContainer(int cardinality)
         {
             m_Bitmap = new ulong[BitmapLength];
@@ -58,9 +67,28 @@ namespace Collections.Special
             }
         }
 
-        protected internal override int Cardinality => m_Cardinality;
+        internal static BitmapContainer Create(ushort[] values)
+        {
+            return new BitmapContainer(values.Length, values, false);
+        }
 
-        public override int ArraySizeInBytes => MaxCapacity / 8;
+        internal static BitmapContainer Create(int cardinality, ushort[] values)
+        {
+            return new BitmapContainer(cardinality, values, false);
+        }
+
+        internal static BitmapContainer Create(int cardinality, ushort[] values, bool negated)
+        {
+            return new BitmapContainer(cardinality, values, negated);
+        }
+
+        private static ulong[] Clone(ulong[] data)
+        {
+            var result = new ulong[BitmapLength];
+            Buffer.BlockCopy(data, 0, result, 0, BitmapLength * sizeof(ulong));
+            return result;
+        }
+        #endregion
 
         public bool Equals(BitmapContainer other)
         {
@@ -87,22 +115,8 @@ namespace Collections.Special
         }
 
 
-        internal static BitmapContainer Create(ushort[] values)
-        {
-            return new BitmapContainer(values.Length, values, false);
-        }
 
-        internal static BitmapContainer Create(int cardinality, ushort[] values)
-        {
-            return new BitmapContainer(cardinality, values, false);
-        }
-
-        internal static BitmapContainer Create(int cardinality, ushort[] values, bool negated)
-        {
-            return new BitmapContainer(cardinality, values, negated);
-        }
-
-
+        #region 位运算
         internal static BitmapContainer CreateXor(ushort[] first, int firstCardinality, ushort[] second, int secondCardinality)
         {
             var data = new ulong[BitmapLength];
@@ -132,12 +146,6 @@ namespace Collections.Special
             return bc.m_Cardinality <= MaxSize ? (Container) ArrayContainer.Create(bc) : bc;
         }
 
-        private static ulong[] Clone(ulong[] data)
-        {
-            var result = new ulong[BitmapLength];
-            Buffer.BlockCopy(data, 0, result, 0, BitmapLength * sizeof(ulong));
-            return result;
-        }
 
         public static ArrayContainer operator &(BitmapContainer x, ArrayContainer y)
         {
@@ -246,17 +254,55 @@ namespace Collections.Special
             return c;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Contains(ushort x)
+        #endregion
+
+        public override bool Add(ushort value)
         {
-            return Contains(m_Bitmap, x);
+            int wordIndex = value >> 6;
+            int bitIndex = value & 63;
+            ulong mask = 1UL << bitIndex;
+
+            bool existed = (m_Bitmap[wordIndex] & mask) != 0;
+
+            //1 | 1 = 1，不必放进if
+            m_Bitmap[wordIndex] |= mask;
+
+            if (!existed)
+            {
+                m_Cardinality++;
+            }
+
+            return !existed;
+        }
+
+        public override bool Remove(ushort value)
+        {
+            int wordIndex = value >> 6;
+            int bitIndex = value & 63;
+            ulong mask = 1UL << bitIndex;
+
+            bool existed = (m_Bitmap[wordIndex] & mask) != 0;
+
+            if (existed)
+            {
+                m_Bitmap[wordIndex] &= ~mask;
+                m_Cardinality--;
+            }
+
+            return existed;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override bool Contains(ushort x)
+        {
+            return (m_Bitmap[x >> 6] & (1UL << x)) != 0;
+        }
+
+        /*[MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool Contains(ulong[] bitmap, ushort x)
         {
             return (bitmap[x >> 6] & (1UL << x)) != 0;
-        }
+        }*/
 
         protected override bool EqualsInternal(Container other)
         {
@@ -316,7 +362,7 @@ namespace Collections.Special
                 return code;
             }
         }
-
+        #region 序列化
         public static void Serialize(BitmapContainer bc, BinaryWriter binaryWriter)
         {
             for (var i = 0; i < BitmapLength; i++)
@@ -334,5 +380,6 @@ namespace Collections.Special
             }
             return new BitmapContainer(cardinality, data);
         }
+        #endregion
     }
 }
